@@ -20,15 +20,18 @@ public class MarketDataSimulator {
 
     private static final Logger log = LoggerFactory.getLogger(MarketDataSimulator.class);
 
+    private final CandleAggregatorService aggregatorService;
     private final MarketDataProperties properties;
     private final TaskScheduler taskScheduler;
     private final Map<String, Double> lastPriceBySymbol = new ConcurrentHashMap<>();
     private volatile List<CandleInterval> intervals;
 
     public MarketDataSimulator(
+            CandleAggregatorService aggregatorService,
             MarketDataProperties properties,
             TaskScheduler taskScheduler
     ) {
+        this.aggregatorService = aggregatorService;
         this.properties = properties;
         this.taskScheduler = taskScheduler;
     }
@@ -60,6 +63,7 @@ public class MarketDataSimulator {
             int ticks = ThreadLocalRandom.current().nextInt(minTicks, maxTicks + 1);
             for (int i = 0; i < ticks; i++) {
                 BidAskEvent event = nextEvent(symbol, now);
+                aggregatorService.onEvent(event, intervals);
             }
         }
     }
