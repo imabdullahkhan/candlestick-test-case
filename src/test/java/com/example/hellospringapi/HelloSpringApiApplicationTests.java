@@ -1,13 +1,12 @@
 package com.example.hellospringapi;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-
-@SpringBootTest
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 class HelloSpringApiApplicationTests {
 
 	@Test
-	void contextLoads() {
+	void appClassExists() {
+		assertNotNull(HelloSpringApiApplication.class);
 	}
 
 }

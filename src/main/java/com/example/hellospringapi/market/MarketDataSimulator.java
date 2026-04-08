@@ -1,21 +1,22 @@
 package com.example.hellospringapi.market;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.DependsOn;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.stereotype.Component;
 
 @Component
 @EnableScheduling
-@DependsOn("flyway")
 public class MarketDataSimulator {
 
     private static final Logger log = LoggerFactory.getLogger(MarketDataSimulator.class);
@@ -25,6 +26,7 @@ public class MarketDataSimulator {
     private final TaskScheduler taskScheduler;
     private final Map<String, Double> lastPriceBySymbol = new ConcurrentHashMap<>();
     private volatile List<CandleInterval> intervals;
+    private volatile ScheduledFuture<?> scheduledTask;
 
     public MarketDataSimulator(
             CandleAggregatorService aggregatorService,
@@ -45,13 +47,24 @@ public class MarketDataSimulator {
         }
 
         properties.getSymbols().forEach(symbol -> lastPriceBySymbol.put(symbol, seedPrice(symbol)));
-        taskScheduler.scheduleAtFixedRate(this::emitBatch, properties.getSimulatorFixedRateMs());
+        this.scheduledTask = taskScheduler.scheduleAtFixedRate(
+                this::emitBatch, Duration.ofMillis(properties.getSimulatorFixedRateMs()));
         log.info(
                 "Market simulator started with symbols={} intervals={} fixedRateMs={}",
                 properties.getSymbols(),
                 properties.getIntervals(),
                 properties.getSimulatorFixedRateMs()
         );
+    }
+
+    @PreDestroy
+    void shutdown() {
+        log.info("Shutting down market simulator...");
+        if (scheduledTask != null) {
+            scheduledTask.cancel(false);
+        }
+        aggregatorService.flushActiveCandles();
+        log.info("Market simulator stopped.");
     }
 
     private void emitBatch() {

@@ -6,10 +6,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class CandleAggregatorService {
+
+    private static final Logger log = LoggerFactory.getLogger(CandleAggregatorService.class);
 
     private final Map<SeriesKey, MutableCandle> activeCandles = new ConcurrentHashMap<>();
     private final Map<SeriesKey, ConcurrentSkipListMap<Long, Candle>> candleStore = new ConcurrentHashMap<>();
@@ -25,6 +29,8 @@ public class CandleAggregatorService {
     }
 
     public void onEvent(BidAskEvent event, List<CandleInterval> intervals) {
+        log.trace("Received event: symbol={} bid={} ask={} ts={}",
+                event.symbol(), event.bid(), event.ask(), event.timestamp());
         for (CandleInterval interval : intervals) {
             aggregateForInterval(event, interval);
         }
@@ -35,6 +41,8 @@ public class CandleAggregatorService {
         if (historyCacheService != null) {
             List<Candle> cached = historyCacheService.get(cacheKey);
             if (cached != null) {
+                log.debug("Cache hit for history: symbol={} interval={} from={} to={}",
+                        symbol, interval.value(), from, to);
                 return cached;
             }
         }
@@ -60,7 +68,22 @@ public class CandleAggregatorService {
         if (historyCacheService != null) {
             historyCacheService.put(cacheKey, result);
         }
+        log.debug("History query: symbol={} interval={} from={} to={} candles={}",
+                symbol, interval.value(), from, to, result.size());
         return result;
+    }
+
+    public void flushActiveCandles() {
+        log.info("Flushing {} active candle(s) before shutdown...", activeCandles.size());
+        activeCandles.forEach((key, mutableCandle) -> {
+            Candle candle = mutableCandle.toImmutable();
+            candleStore.computeIfAbsent(key, ignored -> new ConcurrentSkipListMap<>())
+                    .put(candle.time(), candle);
+            persistIfEnabled(key, candle);
+            log.debug("Flushed candle: symbol={} interval={} time={}", key.symbol(), key.interval().value(), candle.time());
+        });
+        activeCandles.clear();
+        log.info("Active candle flush complete.");
     }
 
     private void aggregateForInterval(BidAskEvent event, CandleInterval interval) {
@@ -83,7 +106,8 @@ public class CandleAggregatorService {
                 return current;
             }
 
-            // Late event for an already-closed bucket: update historical candle.
+            log.debug("Late event for closed bucket: symbol={} interval={} bucket={}",
+                    seriesKey.symbol(), seriesKey.interval().value(), bucketStart);
             candleStore
                     .computeIfAbsent(seriesKey, ignored -> new ConcurrentSkipListMap<>())
                     .compute(bucketStart, (ignored, existing) -> {
@@ -110,6 +134,9 @@ public class CandleAggregatorService {
     }
 
     private void saveFinalized(SeriesKey key, Candle candle) {
+        log.debug("Candle finalized: symbol={} interval={} time={} O={} H={} L={} C={} V={}",
+                key.symbol(), key.interval().value(), candle.time(),
+                candle.open(), candle.high(), candle.low(), candle.close(), candle.volume());
         candleStore.computeIfAbsent(key, ignored -> new ConcurrentSkipListMap<>())
                 .put(candle.time(), candle);
         persistIfEnabled(key, candle);

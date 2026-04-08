@@ -3,11 +3,15 @@ package com.example.hellospringapi.market;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class CandleStorageRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(CandleStorageRepository.class);
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -16,6 +20,7 @@ public class CandleStorageRepository {
     }
 
     public void upsert(String symbol, CandleInterval interval, Candle candle) {
+        log.trace("Upserting candle: symbol={} interval={} time={}", symbol, interval.value(), candle.time());
         jdbcTemplate.update(
                 """
                 INSERT INTO candles(symbol, interval, bucket_start, open, high, low, close, volume, updated_at)
@@ -41,6 +46,7 @@ public class CandleStorageRepository {
     }
 
     public List<Candle> findHistory(String symbol, CandleInterval interval, long from, long to) {
+        log.debug("Querying candles: symbol={} interval={} from={} to={}", symbol, interval.value(), from, to);
         return jdbcTemplate.query(
                 """
                 SELECT bucket_start, open, high, low, close, volume
