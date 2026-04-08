@@ -40,7 +40,23 @@ public class CandleStorageRepository {
         );
     }
 
-
+    public List<Candle> findHistory(String symbol, CandleInterval interval, long from, long to) {
+        return jdbcTemplate.query(
+                """
+                SELECT bucket_start, open, high, low, close, volume
+                FROM candles
+                WHERE symbol = ?
+                  AND interval = ?
+                  AND bucket_start BETWEEN ? AND ?
+                ORDER BY bucket_start ASC
+                """,
+                this::mapRow,
+                symbol,
+                interval.value(),
+                from,
+                to
+        );
+    }
 
     private Candle mapRow(ResultSet rs, int rowNum) throws SQLException {
         return new Candle(
