@@ -91,13 +91,21 @@ public class CandleAggregatorService {
         long bucketStart = interval.bucketStart(event.timestamp());
         double price = midPrice(event);
 
+        List<Candle> pendingPersist = new ArrayList<>(2);
+
         activeCandles.compute(key, (seriesKey, current) -> {
             if (current == null) {
                 return MutableCandle.create(bucketStart, price);
             }
 
             if (bucketStart > current.time) {
-                saveFinalized(seriesKey, current.toImmutable());
+                Candle finalized = current.toImmutable();
+                log.debug("Candle finalized: symbol={} interval={} time={} O={} H={} L={} C={} V={}",
+                        seriesKey.symbol(), seriesKey.interval().value(), finalized.time(),
+                        finalized.open(), finalized.high(), finalized.low(), finalized.close(), finalized.volume());
+                candleStore.computeIfAbsent(seriesKey, ignored -> new ConcurrentSkipListMap<>())
+                        .put(finalized.time(), finalized);
+                pendingPersist.add(finalized);
                 return MutableCandle.create(bucketStart, price);
             }
 
@@ -108,15 +116,16 @@ public class CandleAggregatorService {
 
             log.debug("Late event for closed bucket: symbol={} interval={} bucket={}",
                     seriesKey.symbol(), seriesKey.interval().value(), bucketStart);
-            candleStore
+            Candle updated = candleStore
                     .computeIfAbsent(seriesKey, ignored -> new ConcurrentSkipListMap<>())
-                    .compute(bucketStart, (ignored, existing) -> {
-                        Candle updated = updateHistoric(existing, bucketStart, price);
-                        persistIfEnabled(seriesKey, updated);
-                        return updated;
-                    });
+                    .compute(bucketStart, (ignored, existing) -> updateHistoric(existing, bucketStart, price));
+            pendingPersist.add(updated);
             return current;
         });
+
+        for (Candle candle : pendingPersist) {
+            persistIfEnabled(key, candle);
+        }
     }
 
     private Candle updateHistoric(Candle existing, long bucketStart, double price) {
@@ -131,15 +140,6 @@ public class CandleAggregatorService {
                 price,
                 existing.volume() + 1
         );
-    }
-
-    private void saveFinalized(SeriesKey key, Candle candle) {
-        log.debug("Candle finalized: symbol={} interval={} time={} O={} H={} L={} C={} V={}",
-                key.symbol(), key.interval().value(), candle.time(),
-                candle.open(), candle.high(), candle.low(), candle.close(), candle.volume());
-        candleStore.computeIfAbsent(key, ignored -> new ConcurrentSkipListMap<>())
-                .put(candle.time(), candle);
-        persistIfEnabled(key, candle);
     }
 
     private void persistIfEnabled(SeriesKey key, Candle candle) {

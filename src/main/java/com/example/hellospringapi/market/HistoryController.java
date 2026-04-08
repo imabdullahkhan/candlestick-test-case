@@ -3,15 +3,11 @@ package com.example.hellospringapi.market;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping
 public class HistoryController {
 
     private static final Logger log = LoggerFactory.getLogger(HistoryController.class);
@@ -66,12 +62,5 @@ public class HistoryController {
         List<Long> v = candles.stream().map(Candle::volume).toList();
         log.info("Returning {} candle(s) for symbol={} interval={}", candles.size(), symbol, interval);
         return new HistoryResponse("ok", t, o, h, l, c, v);
-    }
-
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    private static class BadRequestException extends RuntimeException {
-        private BadRequestException(String message) {
-            super(message);
-        }
     }
 }
