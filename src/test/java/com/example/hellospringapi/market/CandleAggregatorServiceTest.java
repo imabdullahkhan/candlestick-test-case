@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CandleAggregatorServiceTest {
 
     private CandleAggregatorService createService() {
-        return new CandleAggregatorService(null, null);
+        return new CandleAggregatorService(null, null, null);
     }
 
     @Test

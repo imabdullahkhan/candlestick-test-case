@@ -15,7 +15,7 @@ class HistoryControllerTest {
 
     @BeforeEach
     void setUp() {
-        aggregatorService = new CandleAggregatorService(null, null);
+        aggregatorService = new CandleAggregatorService(null, null, null);
         controller = new HistoryController(aggregatorService);
     }
 

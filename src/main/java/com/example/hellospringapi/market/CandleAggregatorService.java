@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import org.slf4j.Logger;
@@ -19,13 +20,16 @@ public class CandleAggregatorService {
     private final Map<SeriesKey, ConcurrentSkipListMap<Long, Candle>> candleStore = new ConcurrentHashMap<>();
     private final CandleStorageRepository candleStorageRepository;
     private final HistoryCacheService historyCacheService;
+    private final RedisCandleBucketService redisCandleBucketService;
 
     public CandleAggregatorService(
             CandleStorageRepository candleStorageRepository,
-            HistoryCacheService historyCacheService
+            HistoryCacheService historyCacheService,
+            RedisCandleBucketService redisCandleBucketService
     ) {
         this.candleStorageRepository = candleStorageRepository;
         this.historyCacheService = historyCacheService;
+        this.redisCandleBucketService = redisCandleBucketService;
     }
 
     public void onEvent(BidAskEvent event, List<CandleInterval> intervals) {
@@ -47,21 +51,22 @@ public class CandleAggregatorService {
             }
         }
 
-        SeriesKey key = new SeriesKey(symbol, interval);
         List<Candle> result = new ArrayList<>();
         if (candleStorageRepository != null) {
             result.addAll(candleStorageRepository.findHistory(symbol, interval, from, to));
         } else {
+            SeriesKey key = new SeriesKey(symbol, interval);
             ConcurrentSkipListMap<Long, Candle> history = candleStore.get(key);
             if (history != null) {
                 result.addAll(history.subMap(from, true, to, true).values());
             }
         }
 
-        MutableCandle active = activeCandles.get(key);
-        if (active != null && active.time >= from && active.time <= to) {
-            result.removeIf(c -> c.time() == active.time);
-            result.add(active.toImmutable());
+        Optional<Candle> active = getActiveCandle(symbol, interval);
+        if (active.isPresent() && active.get().time() >= from && active.get().time() <= to) {
+            long activeTime = active.get().time();
+            result.removeIf(c -> c.time() == activeTime);
+            result.add(active.get());
         }
 
         result.sort(Comparator.comparingLong(Candle::time));
@@ -74,7 +79,12 @@ public class CandleAggregatorService {
     }
 
     public void flushActiveCandles() {
-        log.info("Flushing {} active candle(s) before shutdown...", activeCandles.size());
+        if (redisCandleBucketService != null && candleStorageRepository != null) {
+            redisCandleBucketService.flushToDb(candleStorageRepository);
+            return;
+        }
+
+        log.info("Flushing {} in-memory active candle(s) before shutdown...", activeCandles.size());
         activeCandles.forEach((key, mutableCandle) -> {
             Candle candle = mutableCandle.toImmutable();
             candleStore.computeIfAbsent(key, ignored -> new ConcurrentSkipListMap<>())
@@ -91,6 +101,37 @@ public class CandleAggregatorService {
         long bucketStart = interval.bucketStart(event.timestamp());
         double price = midPrice(event);
 
+        if (redisCandleBucketService != null) {
+            aggregateViaRedis(key, event.symbol(), interval, bucketStart, price);
+        } else {
+            aggregateInMemory(key, bucketStart, price);
+        }
+    }
+
+    private void aggregateViaRedis(SeriesKey key, String symbol, CandleInterval interval, long bucketStart, double price) {
+        RedisCandleBucketService.AggregateResult result =
+                redisCandleBucketService.aggregate(symbol, interval, bucketStart, price);
+
+        switch (result.type()) {
+            case FINALIZED -> {
+                Candle finalized = result.finalized();
+                candleStore.computeIfAbsent(key, ignored -> new ConcurrentSkipListMap<>())
+                        .put(finalized.time(), finalized);
+                persistIfEnabled(key, finalized);
+            }
+            case LATE_EVENT -> {
+                Candle updated = candleStore
+                        .computeIfAbsent(key, ignored -> new ConcurrentSkipListMap<>())
+                        .compute(result.lateBucket(), (ignored, existing) ->
+                                updateHistoric(existing, result.lateBucket(), result.latePrice()));
+                persistIfEnabled(key, updated);
+            }
+            case REDIS_UNAVAILABLE -> aggregateInMemory(key, bucketStart, price);
+            case UPDATED -> { }
+        }
+    }
+
+    private void aggregateInMemory(SeriesKey key, long bucketStart, double price) {
         List<Candle> pendingPersist = new ArrayList<>(2);
 
         activeCandles.compute(key, (seriesKey, current) -> {
@@ -128,6 +169,22 @@ public class CandleAggregatorService {
         }
     }
 
+    private Optional<Candle> getActiveCandle(String symbol, CandleInterval interval) {
+        if (redisCandleBucketService != null) {
+            Optional<Candle> redisCandle = redisCandleBucketService.getActiveCandle(symbol, interval);
+            if (redisCandle.isPresent()) {
+                return redisCandle;
+            }
+        }
+
+        SeriesKey key = new SeriesKey(symbol, interval);
+        MutableCandle active = activeCandles.get(key);
+        if (active != null) {
+            return Optional.of(active.toImmutable());
+        }
+        return Optional.empty();
+    }
+
     private Candle updateHistoric(Candle existing, long bucketStart, double price) {
         if (existing == null) {
             return new Candle(bucketStart, price, price, price, price, 1L);
@@ -156,7 +213,7 @@ public class CandleAggregatorService {
         return (event.bid() + event.ask()) / 2.0;
     }
 
-    private record SeriesKey(String symbol, CandleInterval interval) {
+    record SeriesKey(String symbol, CandleInterval interval) {
     }
 
     private static final class MutableCandle {
