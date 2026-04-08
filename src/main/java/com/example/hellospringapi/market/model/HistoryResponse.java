@@ -1,4 +1,4 @@
-package com.example.hellospringapi.market;
+package com.example.hellospringapi.market.model;
 
 import java.util.List;
 

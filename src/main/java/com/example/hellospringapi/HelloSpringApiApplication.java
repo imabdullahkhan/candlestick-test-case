@@ -1,6 +1,6 @@
 package com.example.hellospringapi;
 
-import com.example.hellospringapi.market.MarketDataProperties;
+import com.example.hellospringapi.market.simulator.MarketDataProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

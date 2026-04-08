@@ -1,5 +1,6 @@
-package com.example.hellospringapi.market;
+package com.example.hellospringapi.market.controller;
 
+import com.example.hellospringapi.market.model.ErrorResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;

@@ -1,6 +1,13 @@
 package com.example.hellospringapi.market;
 
+import com.example.hellospringapi.market.aggregation.CandleIngestionService;
+import com.example.hellospringapi.market.aggregation.CandleQueryService;
+import com.example.hellospringapi.market.aggregation.bucket.InMemoryBucketStore;
+import com.example.hellospringapi.market.model.BidAskEvent;
+import com.example.hellospringapi.market.model.Candle;
+import com.example.hellospringapi.market.model.CandleInterval;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -8,20 +15,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CandleAggregatorServiceTest {
 
-    private CandleAggregatorService createService() {
-        return new CandleAggregatorService(null, null, null);
+    private CandleIngestionService ingestionService;
+    private CandleQueryService queryService;
+
+    @BeforeEach
+    void setUp() {
+        ingestionService = new CandleIngestionService(new InMemoryBucketStore(), null);
+        queryService = new CandleQueryService(ingestionService, null, null);
     }
 
     @Test
     void shouldAggregateSingleBucketOhlc() {
-        CandleAggregatorService service = createService();
         List<CandleInterval> intervals = List.of(CandleInterval.S1);
 
-        service.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 1000), intervals); // mid 101
-        service.onEvent(new BidAskEvent("BTC-USD", 102.0, 104.0, 1000), intervals); // mid 103
-        service.onEvent(new BidAskEvent("BTC-USD", 99.0, 101.0, 1000), intervals);  // mid 100
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 1000), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 102.0, 104.0, 1000), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 99.0, 101.0, 1000), intervals);
 
-        List<Candle> candles = service.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000);
+        List<Candle> candles = queryService.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000);
         assertEquals(1, candles.size());
 
         Candle candle = candles.get(0);
@@ -35,14 +46,13 @@ class CandleAggregatorServiceTest {
 
     @Test
     void shouldClosePreviousBucketWhenNewBucketStarts() {
-        CandleAggregatorService service = createService();
         List<CandleInterval> intervals = List.of(CandleInterval.S1);
 
-        service.onEvent(new BidAskEvent("ETH-USD", 10.0, 12.0, 2000), intervals); // mid 11
-        service.onEvent(new BidAskEvent("ETH-USD", 12.0, 14.0, 2001), intervals); // mid 13, new bucket
+        ingestionService.onEvent(new BidAskEvent("ETH-USD", 10.0, 12.0, 2000), intervals);
+        ingestionService.onEvent(new BidAskEvent("ETH-USD", 12.0, 14.0, 2001), intervals);
 
-        List<Candle> oldBucket = service.getHistory("ETH-USD", CandleInterval.S1, 2000, 2000);
-        List<Candle> newBucket = service.getHistory("ETH-USD", CandleInterval.S1, 2001, 2001);
+        List<Candle> oldBucket = queryService.getHistory("ETH-USD", CandleInterval.S1, 2000, 2000);
+        List<Candle> newBucket = queryService.getHistory("ETH-USD", CandleInterval.S1, 2001, 2001);
 
         assertEquals(1, oldBucket.size());
         assertEquals(11.0, oldBucket.get(0).open());
@@ -56,10 +66,9 @@ class CandleAggregatorServiceTest {
 
     @Test
     void singleEventProducesValidCandle() {
-        CandleAggregatorService service = createService();
-        service.onEvent(new BidAskEvent("BTC-USD", 50.0, 52.0, 5000), List.of(CandleInterval.S1)); // mid 51
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 50.0, 52.0, 5000), List.of(CandleInterval.S1));
 
-        List<Candle> candles = service.getHistory("BTC-USD", CandleInterval.S1, 5000, 5000);
+        List<Candle> candles = queryService.getHistory("BTC-USD", CandleInterval.S1, 5000, 5000);
         assertEquals(1, candles.size());
 
         Candle c = candles.get(0);
@@ -72,22 +81,20 @@ class CandleAggregatorServiceTest {
 
     @Test
     void emptyHistoryReturnsEmptyList() {
-        CandleAggregatorService service = createService();
-        List<Candle> candles = service.getHistory("BTC-USD", CandleInterval.S1, 0, 9999);
+        List<Candle> candles = queryService.getHistory("BTC-USD", CandleInterval.S1, 0, 9999);
         assertTrue(candles.isEmpty());
     }
 
     @Test
     void historyRangeReturnsOnlyMatchingBuckets() {
-        CandleAggregatorService service = createService();
         List<CandleInterval> intervals = List.of(CandleInterval.S1);
 
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 100), intervals);
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 101), intervals);
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 102), intervals);
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 103), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 100), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 101), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 102), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 103), intervals);
 
-        List<Candle> subset = service.getHistory("BTC-USD", CandleInterval.S1, 101, 102);
+        List<Candle> subset = queryService.getHistory("BTC-USD", CandleInterval.S1, 101, 102);
         assertEquals(2, subset.size());
         assertEquals(101L, subset.get(0).time());
         assertEquals(102L, subset.get(1).time());
@@ -95,14 +102,13 @@ class CandleAggregatorServiceTest {
 
     @Test
     void multipleSymbolsAreTrackedIndependently() {
-        CandleAggregatorService service = createService();
         List<CandleInterval> intervals = List.of(CandleInterval.S1);
 
-        service.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 1000), intervals); // mid 101
-        service.onEvent(new BidAskEvent("ETH-USD", 50.0, 52.0, 1000), intervals);   // mid 51
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 1000), intervals);
+        ingestionService.onEvent(new BidAskEvent("ETH-USD", 50.0, 52.0, 1000), intervals);
 
-        List<Candle> btc = service.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000);
-        List<Candle> eth = service.getHistory("ETH-USD", CandleInterval.S1, 1000, 1000);
+        List<Candle> btc = queryService.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000);
+        List<Candle> eth = queryService.getHistory("ETH-USD", CandleInterval.S1, 1000, 1000);
 
         assertEquals(1, btc.size());
         assertEquals(101.0, btc.get(0).open());
@@ -113,14 +119,13 @@ class CandleAggregatorServiceTest {
 
     @Test
     void multipleIntervalsAggregateIndependently() {
-        CandleAggregatorService service = createService();
         List<CandleInterval> intervals = List.of(CandleInterval.S1, CandleInterval.M1);
 
-        service.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 60), intervals);  // mid 101
-        service.onEvent(new BidAskEvent("BTC-USD", 200.0, 202.0, 61), intervals);  // mid 201, new S1 bucket, same M1 bucket
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 60), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 200.0, 202.0, 61), intervals);
 
-        List<Candle> s1 = service.getHistory("BTC-USD", CandleInterval.S1, 60, 61);
-        List<Candle> m1 = service.getHistory("BTC-USD", CandleInterval.M1, 60, 61);
+        List<Candle> s1 = queryService.getHistory("BTC-USD", CandleInterval.S1, 60, 61);
+        List<Candle> m1 = queryService.getHistory("BTC-USD", CandleInterval.M1, 60, 61);
 
         assertEquals(2, s1.size(), "S1 should have two separate buckets");
         assertEquals(1, m1.size(), "M1 should merge both into one bucket");
@@ -129,14 +134,13 @@ class CandleAggregatorServiceTest {
 
     @Test
     void lateEventUpdatesHistoricalBucket() {
-        CandleAggregatorService service = createService();
         List<CandleInterval> intervals = List.of(CandleInterval.S1);
 
-        service.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 1000), intervals); // mid 101 @ bucket 1000
-        service.onEvent(new BidAskEvent("BTC-USD", 200.0, 202.0, 1001), intervals); // mid 201 @ bucket 1001 (closes 1000)
-        service.onEvent(new BidAskEvent("BTC-USD", 110.0, 112.0, 1000), intervals); // mid 111 @ bucket 1000 (late!)
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 100.0, 102.0, 1000), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 200.0, 202.0, 1001), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 110.0, 112.0, 1000), intervals);
 
-        List<Candle> historical = service.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000);
+        List<Candle> historical = queryService.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000);
         assertEquals(1, historical.size());
 
         Candle c = historical.get(0);
@@ -149,14 +153,13 @@ class CandleAggregatorServiceTest {
 
     @Test
     void historyResultsAreSortedByTime() {
-        CandleAggregatorService service = createService();
         List<CandleInterval> intervals = List.of(CandleInterval.S1);
 
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1003), intervals);
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1001), intervals);
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1002), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1003), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1001), intervals);
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1002), intervals);
 
-        List<Candle> candles = service.getHistory("BTC-USD", CandleInterval.S1, 1000, 1005);
+        List<Candle> candles = queryService.getHistory("BTC-USD", CandleInterval.S1, 1000, 1005);
         assertEquals(3, candles.size());
         assertTrue(candles.get(0).time() <= candles.get(1).time());
         assertTrue(candles.get(1).time() <= candles.get(2).time());
@@ -164,26 +167,21 @@ class CandleAggregatorServiceTest {
 
     @Test
     void midPriceIsAverageOfBidAndAsk() {
-        CandleAggregatorService service = createService();
-        service.onEvent(new BidAskEvent("BTC-USD", 99.0, 101.0, 1000), List.of(CandleInterval.S1));
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 99.0, 101.0, 1000), List.of(CandleInterval.S1));
 
-        Candle c = service.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000).get(0);
+        Candle c = queryService.getHistory("BTC-USD", CandleInterval.S1, 1000, 1000).get(0);
         assertEquals(100.0, c.open());
     }
 
     @Test
     void queryForUnknownSymbolReturnsEmpty() {
-        CandleAggregatorService service = createService();
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1000), List.of(CandleInterval.S1));
-
-        assertTrue(service.getHistory("UNKNOWN", CandleInterval.S1, 0, 9999).isEmpty());
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1000), List.of(CandleInterval.S1));
+        assertTrue(queryService.getHistory("UNKNOWN", CandleInterval.S1, 0, 9999).isEmpty());
     }
 
     @Test
     void queryForDifferentIntervalReturnsEmpty() {
-        CandleAggregatorService service = createService();
-        service.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1000), List.of(CandleInterval.S1));
-
-        assertTrue(service.getHistory("BTC-USD", CandleInterval.H1, 0, 9999).isEmpty());
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 1000), List.of(CandleInterval.S1));
+        assertTrue(queryService.getHistory("BTC-USD", CandleInterval.H1, 0, 9999).isEmpty());
     }
 }

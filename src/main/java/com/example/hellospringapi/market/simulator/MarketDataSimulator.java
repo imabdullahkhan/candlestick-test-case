@@ -1,5 +1,8 @@
-package com.example.hellospringapi.market;
+package com.example.hellospringapi.market.simulator;
 
+import com.example.hellospringapi.market.aggregation.CandleIngestionService;
+import com.example.hellospringapi.market.model.BidAskEvent;
+import com.example.hellospringapi.market.model.CandleInterval;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
@@ -21,7 +24,7 @@ public class MarketDataSimulator {
 
     private static final Logger log = LoggerFactory.getLogger(MarketDataSimulator.class);
 
-    private final CandleAggregatorService aggregatorService;
+    private final CandleIngestionService ingestionService;
     private final MarketDataProperties properties;
     private final TaskScheduler taskScheduler;
     private final Map<String, Double> lastPriceBySymbol = new ConcurrentHashMap<>();
@@ -29,11 +32,11 @@ public class MarketDataSimulator {
     private volatile ScheduledFuture<?> scheduledTask;
 
     public MarketDataSimulator(
-            CandleAggregatorService aggregatorService,
+            CandleIngestionService ingestionService,
             MarketDataProperties properties,
             TaskScheduler taskScheduler
     ) {
-        this.aggregatorService = aggregatorService;
+        this.ingestionService = ingestionService;
         this.properties = properties;
         this.taskScheduler = taskScheduler;
     }
@@ -49,12 +52,8 @@ public class MarketDataSimulator {
         properties.getSymbols().forEach(symbol -> lastPriceBySymbol.put(symbol, seedPrice(symbol)));
         this.scheduledTask = taskScheduler.scheduleAtFixedRate(
                 this::emitBatch, Duration.ofMillis(properties.getSimulatorFixedRateMs()));
-        log.info(
-                "Market simulator started with symbols={} intervals={} fixedRateMs={}",
-                properties.getSymbols(),
-                properties.getIntervals(),
-                properties.getSimulatorFixedRateMs()
-        );
+        log.info("Market simulator started with symbols={} intervals={} fixedRateMs={}",
+                properties.getSymbols(), properties.getIntervals(), properties.getSimulatorFixedRateMs());
     }
 
     @PreDestroy
@@ -63,21 +62,25 @@ public class MarketDataSimulator {
         if (scheduledTask != null) {
             scheduledTask.cancel(false);
         }
-        aggregatorService.flushActiveCandles();
+        ingestionService.flushActiveCandles();
         log.info("Market simulator stopped.");
     }
 
     private void emitBatch() {
-        long now = Instant.now().getEpochSecond();
-        int minTicks = Math.max(1, properties.getSimulatorMinTicksPerRun());
-        int maxTicks = Math.max(minTicks, properties.getSimulatorMaxTicksPerRun());
+        try {
+            long now = Instant.now().getEpochSecond();
+            int minTicks = Math.max(1, properties.getSimulatorMinTicksPerRun());
+            int maxTicks = Math.max(minTicks, properties.getSimulatorMaxTicksPerRun());
 
-        for (String symbol : properties.getSymbols()) {
-            int ticks = ThreadLocalRandom.current().nextInt(minTicks, maxTicks + 1);
-            for (int i = 0; i < ticks; i++) {
-                BidAskEvent event = nextEvent(symbol, now);
-                aggregatorService.onEvent(event, intervals);
+            for (String symbol : properties.getSymbols()) {
+                int ticks = ThreadLocalRandom.current().nextInt(minTicks, maxTicks + 1);
+                for (int i = 0; i < ticks; i++) {
+                    BidAskEvent event = nextEvent(symbol, now);
+                    ingestionService.onEvent(event, intervals);
+                }
             }
+        } catch (Exception e) {
+            log.error("Error in simulator batch: {}", e.getMessage(), e);
         }
     }
 

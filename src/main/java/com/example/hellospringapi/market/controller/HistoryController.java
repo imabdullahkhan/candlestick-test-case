@@ -1,5 +1,9 @@
-package com.example.hellospringapi.market;
+package com.example.hellospringapi.market.controller;
 
+import com.example.hellospringapi.market.aggregation.CandleQueryService;
+import com.example.hellospringapi.market.model.Candle;
+import com.example.hellospringapi.market.model.CandleInterval;
+import com.example.hellospringapi.market.model.HistoryResponse;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,10 +16,10 @@ public class HistoryController {
 
     private static final Logger log = LoggerFactory.getLogger(HistoryController.class);
 
-    private final CandleAggregatorService aggregatorService;
+    private final CandleQueryService queryService;
 
-    public HistoryController(CandleAggregatorService aggregatorService) {
-        this.aggregatorService = aggregatorService;
+    public HistoryController(CandleQueryService queryService) {
+        this.queryService = queryService;
     }
 
     @GetMapping("/history")
@@ -40,18 +44,10 @@ public class HistoryController {
             throw new BadRequestException("'to' must be greater than or equal to 'from'.");
         }
 
-        List<Candle> candles = aggregatorService.getHistory(symbol, candleInterval, from, to);
+        List<Candle> candles = queryService.getHistory(symbol, candleInterval, from, to);
         if (candles.isEmpty()) {
             log.info("No data for symbol={} interval={} from={} to={}", symbol, interval, from, to);
-            return new HistoryResponse(
-                    "no_data",
-                    List.of(),
-                    List.of(),
-                    List.of(),
-                    List.of(),
-                    List.of(),
-                    List.of()
-            );
+            return new HistoryResponse("no_data", List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
         List<Long> t = candles.stream().map(Candle::time).toList();

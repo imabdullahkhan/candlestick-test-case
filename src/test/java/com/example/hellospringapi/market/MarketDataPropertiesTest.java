@@ -1,5 +1,6 @@
 package com.example.hellospringapi.market;
 
+import com.example.hellospringapi.market.simulator.MarketDataProperties;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

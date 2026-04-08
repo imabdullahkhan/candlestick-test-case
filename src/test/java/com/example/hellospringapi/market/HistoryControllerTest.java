@@ -1,5 +1,14 @@
 package com.example.hellospringapi.market;
 
+import com.example.hellospringapi.market.aggregation.CandleIngestionService;
+import com.example.hellospringapi.market.aggregation.CandleQueryService;
+import com.example.hellospringapi.market.aggregation.bucket.InMemoryBucketStore;
+import com.example.hellospringapi.market.controller.BadRequestException;
+import com.example.hellospringapi.market.controller.GlobalExceptionHandler;
+import com.example.hellospringapi.market.controller.HistoryController;
+import com.example.hellospringapi.market.model.BidAskEvent;
+import com.example.hellospringapi.market.model.CandleInterval;
+import com.example.hellospringapi.market.model.HistoryResponse;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,18 +19,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HistoryControllerTest {
 
-    private CandleAggregatorService aggregatorService;
+    private CandleIngestionService ingestionService;
     private HistoryController controller;
 
     @BeforeEach
     void setUp() {
-        aggregatorService = new CandleAggregatorService(null, null, null);
-        controller = new HistoryController(aggregatorService);
+        ingestionService = new CandleIngestionService(new InMemoryBucketStore(), null);
+        CandleQueryService queryService = new CandleQueryService(ingestionService, null, null);
+        controller = new HistoryController(queryService);
     }
 
     @Test
     void validRequestReturnsOkWithCandles() {
-        aggregatorService.onEvent(
+        ingestionService.onEvent(
                 new BidAskEvent("BTC-USD", 100.0, 102.0, 1000),
                 List.of(CandleInterval.S1)
         );
@@ -74,9 +84,9 @@ class HistoryControllerTest {
 
     @Test
     void responseContainsCorrectOhlcvData() {
-        aggregatorService.onEvent(new BidAskEvent("ETH-USD", 50.0, 52.0, 2000), List.of(CandleInterval.S1)); // mid 51
-        aggregatorService.onEvent(new BidAskEvent("ETH-USD", 54.0, 56.0, 2000), List.of(CandleInterval.S1)); // mid 55
-        aggregatorService.onEvent(new BidAskEvent("ETH-USD", 48.0, 50.0, 2000), List.of(CandleInterval.S1)); // mid 49
+        ingestionService.onEvent(new BidAskEvent("ETH-USD", 50.0, 52.0, 2000), List.of(CandleInterval.S1));
+        ingestionService.onEvent(new BidAskEvent("ETH-USD", 54.0, 56.0, 2000), List.of(CandleInterval.S1));
+        ingestionService.onEvent(new BidAskEvent("ETH-USD", 48.0, 50.0, 2000), List.of(CandleInterval.S1));
 
         HistoryResponse response = controller.history("ETH-USD", "1s", 2000, 2000);
 
@@ -90,9 +100,9 @@ class HistoryControllerTest {
 
     @Test
     void multipleBucketsReturnMultipleEntries() {
-        aggregatorService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 100), List.of(CandleInterval.S1));
-        aggregatorService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 101), List.of(CandleInterval.S1));
-        aggregatorService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 102), List.of(CandleInterval.S1));
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 100), List.of(CandleInterval.S1));
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 101), List.of(CandleInterval.S1));
+        ingestionService.onEvent(new BidAskEvent("BTC-USD", 10.0, 12.0, 102), List.of(CandleInterval.S1));
 
         HistoryResponse response = controller.history("BTC-USD", "1s", 100, 102);
 

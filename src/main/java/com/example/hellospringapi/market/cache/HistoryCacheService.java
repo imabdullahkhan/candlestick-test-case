@@ -1,5 +1,6 @@
-package com.example.hellospringapi.market;
+package com.example.hellospringapi.market.cache;
 
+import com.example.hellospringapi.market.model.Candle;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
